@@ -1,0 +1,6 @@
+[submodule "frontend-pulse"]
+	path = frontend-pulse
+	url = https://github.com/raminkhalilii/frontend-pulse.git
+[submodule "backend-pulse"]
+	path = backend-pulse
+	url = https://github.com/raminkhalilii/backend-pulse.git
