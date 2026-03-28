@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── 1. Lint ────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend-pulse
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend-pulse/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Run ESLint without --fix so lint errors actually fail the pipeline.
+      # --max-warnings=0 treats warnings as errors too.
+      - name: Run ESLint
+        run: npx eslint "{src,apps,libs,test}/**/*.ts" --max-warnings=0
+
+  # ── 2. Test ───────────────────────────────────────────────────────────────
+  test:
+    name: Test
+    needs: lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend-pulse
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend-pulse/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+  # ── 3. Build ──────────────────────────────────────────────────────────────
+  build:
+    name: Build (Docker)
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Verify all three application images compile successfully.
+      # Secrets are not needed at build time — only at runtime.
+      - name: Build Docker images
+        run: docker compose build --parallel

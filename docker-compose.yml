@@ -1,0 +1,129 @@
+name: pulse
+
+# ─── Infrastructure ───────────────────────────────────────────────────────────
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: rP6_ChaKD3tI5opMeRzM
+      POSTGRES_DB: pulse_database
+    ports:
+      - "5433:5432" # exposed as 5433 to match local .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d pulse_database"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - pulse_net
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - pulse_net
+
+# ─── Application services ─────────────────────────────────────────────────────
+
+  backend:
+    build:
+      context: ./backend-pulse
+      dockerfile: Dockerfile.dev
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Load secrets (ACCESS_TOKEN_SECRET, JWT_REFRESH_SECRET) from the local .env,
+    # then override the connectivity strings so they point at Docker service names.
+    env_file:
+      - ./backend-pulse/.env
+    environment:
+      DATABASE_URL: postgresql://admin:rP6_ChaKD3tI5opMeRzM@postgres:5432/pulse_database
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    # Run pending migrations, then start with hot-reload
+    command: sh -c "npx prisma migrate deploy && npm run start:dev"
+    ports:
+      - "3000:3000"
+    volumes:
+      # Bind-mount source for hot-reload; node_modules stays inside the container
+      - ./backend-pulse/src:/app/src
+      - ./backend-pulse/prisma:/app/prisma
+    networks:
+      - pulse_net
+
+  worker:
+    build:
+      context: ./backend-pulse
+      dockerfile: Dockerfile.dev
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - ./backend-pulse/.env
+    environment:
+      DATABASE_URL: postgresql://admin:rP6_ChaKD3tI5opMeRzM@postgres:5432/pulse_database
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    # Worker has no HTTP server — skip migrations (backend already ran them)
+    command: ["npm", "run", "start:worker:dev"]
+    volumes:
+      - ./backend-pulse/src:/app/src
+      - ./backend-pulse/prisma:/app/prisma
+    networks:
+      - pulse_net
+
+  frontend:
+    build:
+      context: ./frontend-pulse
+      dockerfile: Dockerfile.dev
+    restart: unless-stopped
+    depends_on:
+      - backend
+    env_file:
+      - ./frontend-pulse/.env.local
+    environment:
+      # Override so the Next.js proxy reaches the backend via Docker network
+      BACKEND_URL: http://backend:3000
+      # WebSocket URL — the browser connects to this directly (must be host-reachable)
+      NEXT_PUBLIC_API_URL: http://localhost:3000
+    ports:
+      - "3001:3001"
+    volumes:
+      # Bind-mount source dirs for hot-reload
+      - ./frontend-pulse/app:/app/app
+      - ./frontend-pulse/components:/app/components
+      - ./frontend-pulse/hooks:/app/hooks
+      - ./frontend-pulse/lib:/app/lib
+      - ./frontend-pulse/types:/app/types
+    networks:
+      - pulse_net
+
+# ─── Volumes & Networks ───────────────────────────────────────────────────────
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  pulse_net:
+    driver: bridge
