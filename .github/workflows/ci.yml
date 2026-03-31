@@ -137,4 +137,4 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            bash /opt/pulse/scripts/deploy.sh ${{ github.sha }}
+            bash /home/ec2-user/Pulse/scripts/deploy.sh ${{ github.sha }}
