@@ -1,7 +1,7 @@
-# Pulse — Uptime Monitoring
+# Pulse — Uptime Monitoring https://pulsee.website
+
 
 Pulse is a self-hosted uptime monitoring platform. It periodically checks your websites and endpoints, records response latency and availability, and delivers real-time status updates to your dashboard over WebSockets.
-
 ---
 
 ## Features

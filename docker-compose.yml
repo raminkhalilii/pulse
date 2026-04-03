@@ -106,15 +106,15 @@ services:
       BACKEND_URL: http://backend:3000
       # WebSocket URL — the browser connects to this directly (must be host-reachable)
       NEXT_PUBLIC_API_URL: http://localhost:3000
+      # Force Next.js to watch for changes (Fixes Windows/Docker syncing issues)
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
     ports:
       - "3001:3001"
     volumes:
-      # Bind-mount source dirs for hot-reload
-      - ./frontend-pulse/app:/app/app
-      - ./frontend-pulse/components:/app/components
-      - ./frontend-pulse/hooks:/app/hooks
-      - ./frontend-pulse/lib:/app/lib
-      - ./frontend-pulse/types:/app/types
+      - ./frontend-pulse:/app       # Mounts EVERYTHING to sync instantly
+      - /app/node_modules           # Keeps the container's Linux modules safe
+      - /app/.next                  # Keeps the dev build cache internal
     networks:
       - pulse_net
 
