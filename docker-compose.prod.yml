@@ -56,6 +56,13 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       ACCESS_TOKEN_SECRET: ${ACCESS_TOKEN_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+      GITHUB_CALLBACK_URL: ${GITHUB_CALLBACK_URL}
+      FRONTEND_URL: ${FRONTEND_URL}
     # Migrations run once at startup, then the API server starts
     command: sh -c "npx prisma migrate deploy && node dist/src/main.js"
     # No ports: block — NGINX is the only public ingress
