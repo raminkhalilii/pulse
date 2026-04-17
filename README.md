@@ -232,6 +232,16 @@ WebSocket namespace: `/socket.io` — emits `heartbeat` events with live check r
 
 ---
 
+## Submodule Hooks
+
+After cloning, run once to install post-commit hooks that automatically stage submodule pointer updates in this repo whenever you commit inside `frontend-pulse` or `backend-pulse`:
+
+```bash
+bash scripts/setup-hooks.sh
+```
+
+---
+
 ## License
 
 MIT
