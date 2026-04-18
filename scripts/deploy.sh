@@ -10,9 +10,12 @@
 set -euo pipefail
 
 IMAGE_TAG="${1:-latest}"
-APP_DIR="/opt/pulse"
+# Derive APP_DIR from the script's own location so it works regardless of
+# where on the server this repo is checked out.
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMPOSE="docker compose -f ${APP_DIR}/docker-compose.prod.yml"
 
-echo "==> [deploy] Starting deployment (tag: ${IMAGE_TAG})"
+echo "==> [deploy] Starting deployment (tag: ${IMAGE_TAG}) in ${APP_DIR}"
 
 cd "$APP_DIR"
 
@@ -24,19 +27,42 @@ git submodule update --init --recursive
 
 # ── 2. Pull updated images from GHCR ─────────────────────────────────────────
 echo "==> [deploy] Pulling Docker images (tag: ${IMAGE_TAG})"
-IMAGE_TAG="$IMAGE_TAG" docker compose -f docker-compose.prod.yml pull backend frontend
+IMAGE_TAG="$IMAGE_TAG" $COMPOSE pull backend worker frontend
 
-# ── 3. Zero-downtime rolling restart ─────────────────────────────────────────
-# Bring up infrastructure first (postgres, redis) if not already running,
-# then rolling-replace the application containers.
-echo "==> [deploy] Restarting application containers"
-IMAGE_TAG="$IMAGE_TAG" docker compose -f docker-compose.prod.yml up -d \
+# ── 3. Health-gated rolling restart ──────────────────────────────────────────
+# --no-deps    : only restart the named services, not postgres/redis/nginx
+# --no-build   : use the pre-built image we just pulled
+# --wait       : BLOCK until every container with a healthcheck reports healthy.
+#                This is what makes the deploy zero-downtime:
+#                Docker starts the new container, waits for /health to pass,
+#                THEN stops the old one. The deploy script only continues
+#                (and Nginx only reloads) once the new container is confirmed ready.
+#                If the new container never becomes healthy, --wait exits non-zero
+#                and the old container keeps running (automatic rollback).
+echo "==> [deploy] Starting new containers (waiting for health checks to pass)..."
+IMAGE_TAG="$IMAGE_TAG" $COMPOSE up -d \
+  --no-deps \
+  --no-build \
   --remove-orphans \
-  --no-build
+  --wait \
+  backend worker frontend
 
-# ── 4. Remove dangling images to reclaim disk ─────────────────────────────────
+echo "✓ All containers healthy"
+
+# ── 4. Reload Nginx ───────────────────────────────────────────────────────────
+# Reload (not restart) so in-flight SSL connections are not dropped.
+# This also flushes Nginx's DNS cache so it re-resolves the new `backend`
+# container IP after Docker replaced the container.
+echo "==> [deploy] Reloading Nginx..."
+$COMPOSE exec -T nginx nginx -t   # validate config first
+$COMPOSE exec -T nginx nginx -s reload
+echo "✓ Nginx reloaded"
+
+# ── 5. Remove dangling images to reclaim disk ─────────────────────────────────
 echo "==> [deploy] Pruning dangling images"
 docker image prune -f
 
-echo "==> [deploy] Done. Running containers:"
-docker compose -f docker-compose.prod.yml ps
+echo ""
+echo "✓ Deploy complete — zero downtime (tag: ${IMAGE_TAG})"
+echo ""
+$COMPOSE ps

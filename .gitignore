@@ -3,3 +3,4 @@
 .secret
 /CLAUDE.md
 pulsee.pem
+nginx/nginx.conf.bak

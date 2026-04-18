@@ -122,7 +122,7 @@ jobs:
   #   VPS_HOST        — IP address or hostname of the VPS
   #   VPS_USER        — SSH user (e.g. "deploy" or "ubuntu")
   #   VPS_SSH_KEY     — PEM-encoded private key for SSH access
-  #   DOMAIN          — Your domain (e.g. "pulse.example.com")
+  #   DOMAIN          — Your domain (e.g. "pulsee.website")
   deploy:
     name: Deploy to VPS
     needs: build
@@ -130,11 +130,43 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
+      # ── Step 1: Run the health-gated deploy script on the server ─────────────
+      # The script uses `docker compose up --wait` which BLOCKS until the new
+      # container's healthcheck passes. If it never passes, the script exits
+      # non-zero and this step fails — preventing a broken deploy from being
+      # silently marked as successful.
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          # command_timeout must exceed the worst-case deploy time:
+          # 30s start_period + 3 × 10s healthcheck interval + buffer = ~90s
+          command_timeout: 120m
           script: |
             bash /home/ec2-user/Pulse/scripts/deploy.sh ${{ github.sha }}
+
+      # ── Step 2: External verification from GitHub Actions runner ─────────────
+      # Confirms the /health endpoint is publicly reachable through Nginx + TLS.
+      # Runs from OUTSIDE the server — if Nginx is misconfigured this will catch it.
+      - name: Verify deployment (external health check)
+        run: |
+          echo "Waiting 5s for Nginx to finish reloading..."
+          sleep 5
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 10 \
+            https://${{ secrets.DOMAIN }}/health)
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "✗ External health check failed — got HTTP $HTTP_CODE"
+            exit 1
+          fi
+          echo "✓ External health check passed (HTTP $HTTP_CODE)"
+
+      # ── Step 3: Notify on failure (add your alert channel here) ──────────────
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::Deploy to production FAILED for commit ${{ github.sha }}"
+          echo "Check the deploy logs above for details."
+          # Extend this step to POST to Slack/Discord/PagerDuty if desired.

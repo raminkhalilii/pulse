@@ -38,6 +38,47 @@ services:
     networks:
       - pulse_net
 
+# ─── Analytics (Matomo) ────────────────────────────────────────────────────────
+# Matomo requires MySQL/MariaDB — it cannot share the Postgres instance.
+# matomo-db has NO port binding: only Matomo can reach it via pulse_net.
+
+  matomo-db:
+    image: mariadb:11-lts
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MATOMO_DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MATOMO_DB_NAME:-matomo}
+      MYSQL_USER: ${MATOMO_DB_USER:-matomo}
+      MYSQL_PASSWORD: ${MATOMO_DB_PASSWORD}
+    volumes:
+      - matomo_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - pulse_net
+
+  matomo:
+    image: matomo:5-apache
+    restart: always
+    depends_on:
+      matomo-db:
+        condition: service_healthy
+    environment:
+      MATOMO_DATABASE_HOST: matomo-db
+      MATOMO_DATABASE_DBNAME: ${MATOMO_DB_NAME:-matomo}
+      MATOMO_DATABASE_USERNAME: ${MATOMO_DB_USER:-matomo}
+      MATOMO_DATABASE_PASSWORD: ${MATOMO_DB_PASSWORD}
+    volumes:
+      # Persists Matomo config, plugins, and uploaded assets across container restarts.
+      # config/config.ini.php (written by the web installer) lives here.
+      - matomo_data:/var/www/html
+    # No ports: block — Nginx is the only public ingress
+    networks:
+      - pulse_net
+
 # ─── Application Services ──────────────────────────────────────────────────────
 
   backend:
@@ -48,6 +89,30 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+    # ── Zero-downtime: health gate ──────────────────────────────────────────────
+    # Docker marks the container healthy only after this probe passes.
+    # Nginx's depends_on condition:service_healthy means it waits for this.
+    # The deploy script uses --wait which blocks until healthy before returning.
+    #
+    # Uses Node.js built-in HTTP — no curl/wget needed in the Alpine image.
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "require('http').get('http://localhost:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+      interval: 10s      # check every 10s once start_period has elapsed
+      timeout: 5s        # probe must respond within 5s or it counts as a failure
+      retries: 3         # 3 consecutive failures → container marked unhealthy
+      start_period: 30s  # give NestJS + Prisma migrations time to start up
+
+    # ── Zero-downtime: graceful stop ────────────────────────────────────────────
+    # Docker sends SIGTERM and waits this long before sending SIGKILL.
+    # NestJS enableShutdownHooks() uses this window to drain in-flight requests.
+    # Default Docker timeout is only 10s — not enough for long DB migrations.
+    stop_grace_period: 30s
+
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -77,6 +142,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Workers process BullMQ jobs — give them time to finish the current job
+    stop_grace_period: 30s
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -93,14 +160,12 @@ services:
     image: ghcr.io/${GITHUB_REPOSITORY}/frontend:${IMAGE_TAG:-latest}
     restart: always
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     environment:
       NODE_ENV: production
-      # Server-side: Next.js proxy routes reach backend via the Docker network
       BACKEND_URL: http://backend:3000
-      # Client-side: browser WebSocket/API calls go through the public domain
       NEXT_PUBLIC_API_URL: https://${DOMAIN}
-    # No ports: block — NGINX is the only public ingress
     networks:
       - pulse_net
 
@@ -108,8 +173,10 @@ services:
     image: nginx:1.27-alpine
     restart: always
     depends_on:
-      - backend
-      - frontend
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
     ports:
       - "80:80"
       - "443:443"
@@ -125,6 +192,8 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  matomo_db_data:   # MariaDB data — survives container restarts and image upgrades
+  matomo_data:      # Matomo web root — config, plugins, uploaded assets
 
 networks:
   pulse_net:
