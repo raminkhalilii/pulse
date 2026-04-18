@@ -38,47 +38,6 @@ services:
     networks:
       - pulse_net
 
-# ─── Analytics (Matomo) ────────────────────────────────────────────────────────
-# Matomo requires MySQL/MariaDB — it cannot share the Postgres instance.
-# matomo-db has NO port binding: only Matomo can reach it via pulse_net.
-
-  matomo-db:
-    image: mariadb:11-lts
-    restart: always
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MATOMO_DB_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MATOMO_DB_NAME:-matomo}
-      MYSQL_USER: ${MATOMO_DB_USER:-matomo}
-      MYSQL_PASSWORD: ${MATOMO_DB_PASSWORD}
-    volumes:
-      - matomo_db_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    networks:
-      - pulse_net
-
-  matomo:
-    image: matomo:5-apache
-    restart: always
-    depends_on:
-      matomo-db:
-        condition: service_healthy
-    environment:
-      MATOMO_DATABASE_HOST: matomo-db
-      MATOMO_DATABASE_DBNAME: ${MATOMO_DB_NAME:-matomo}
-      MATOMO_DATABASE_USERNAME: ${MATOMO_DB_USER:-matomo}
-      MATOMO_DATABASE_PASSWORD: ${MATOMO_DB_PASSWORD}
-    volumes:
-      # Persists Matomo config, plugins, and uploaded assets across container restarts.
-      # config/config.ini.php (written by the web installer) lives here.
-      - matomo_data:/var/www/html
-    # No ports: block — Nginx is the only public ingress
-    networks:
-      - pulse_net
-
 # ─── Application Services ──────────────────────────────────────────────────────
 
   backend:
@@ -193,8 +152,6 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  matomo_db_data:   # MariaDB data — survives container restarts and image upgrades
-  matomo_data:      # Matomo web root — config, plugins, uploaded assets
 
 networks:
   pulse_net:
