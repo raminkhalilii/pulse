@@ -145,7 +145,7 @@ jobs:
           # 30s start_period + 3 × 10s healthcheck interval + buffer = ~90s
           command_timeout: 120m
           script: |
-            bash /home/ec2-user/Pulse/scripts/deploy.sh ${{ github.sha }}
+            bash /home/deploy/pulse/scripts/deploy.sh ${{ github.sha }}
 
       # ── Step 2: External verification from GitHub Actions runner ─────────────
       # Confirms the /health endpoint is publicly reachable through Nginx + TLS.

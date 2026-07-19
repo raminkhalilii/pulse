@@ -112,6 +112,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       ACCESS_TOKEN_SECRET: ${ACCESS_TOKEN_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      RESEND_API_KEY: ${RESEND_API_KEY}
     command: ["node", "dist/src/worker/worker.main.js"]
     networks:
       - pulse_net
