@@ -127,6 +127,7 @@ services:
       NODE_ENV: production
       BACKEND_URL: http://backend:3000
       NEXT_PUBLIC_API_URL: https://${DOMAIN}
+      NEXT_PUBLIC_STATUS_DOMAIN: https://status.${DOMAIN}
     networks:
       - pulse_net
 
