@@ -19,11 +19,20 @@ echo "==> [deploy] Starting deployment (tag: ${IMAGE_TAG}) in ${APP_DIR}"
 
 cd "$APP_DIR"
 
+# nginx/nginx.conf is bind-mounted into the container as a single FILE, which
+# Docker pins by inode. `git reset --hard` below replaces the file (new inode),
+# so the running container keeps the OLD file until it is recreated — a plain
+# `nginx -s reload` would reload stale config. Hash it before/after the reset
+# so step 4 can detect a change and force-recreate only when needed.
+NGINX_HASH_BEFORE=$(sha256sum nginx/nginx.conf 2>/dev/null | awk '{print $1}' || echo none)
+
 # ── 1. Pull latest code ───────────────────────────────────────────────────────
 echo "==> [deploy] Pulling latest code from origin/main"
 git fetch origin main
 git reset --hard origin/main
 git submodule update --init --recursive
+
+NGINX_HASH_AFTER=$(sha256sum nginx/nginx.conf 2>/dev/null | awk '{print $1}' || echo none)
 
 # ── 2. Pull updated images from GHCR ─────────────────────────────────────────
 echo "==> [deploy] Pulling Docker images (tag: ${IMAGE_TAG})"
@@ -49,14 +58,42 @@ IMAGE_TAG="$IMAGE_TAG" $COMPOSE up -d \
 
 echo "✓ All containers healthy"
 
+# docker-compose.prod.yml resolves images as `${IMAGE_TAG:-latest}`. Without this,
+# any bare `docker compose ...` run later (e.g. manually on the VPS) without
+# IMAGE_TAG set in the shell falls back to `:latest`, which on the registry is
+# OLDER than what we just deployed — silently downgrading the app. Persist the
+# tag into the .env file that Compose auto-reads for interpolation so it stays
+# pinned even for commands run outside this script.
+ENV_FILE="${APP_DIR}/.env"
+if grep -q '^IMAGE_TAG=' "$ENV_FILE" 2>/dev/null; then
+  sed -i "s|^IMAGE_TAG=.*|IMAGE_TAG=${IMAGE_TAG}|" "$ENV_FILE"
+else
+  printf '\nIMAGE_TAG=%s\n' "${IMAGE_TAG}" >> "$ENV_FILE"
+fi
+echo "✓ Pinned IMAGE_TAG=${IMAGE_TAG} in ${ENV_FILE}"
+
 # ── 4. Reload Nginx ───────────────────────────────────────────────────────────
-# Reload (not restart) so in-flight SSL connections are not dropped.
-# This also flushes Nginx's DNS cache so it re-resolves the new `backend`
-# container IP after Docker replaced the container.
-echo "==> [deploy] Reloading Nginx..."
-$COMPOSE exec -T nginx nginx -t   # validate config first
-$COMPOSE exec -T nginx nginx -s reload
-echo "✓ Nginx reloaded"
+if [ "$NGINX_HASH_BEFORE" != "$NGINX_HASH_AFTER" ]; then
+  # Config changed this deploy — the running container still has the OLD file
+  # pinned by inode, so a reload alone would reload stale config. Validate the
+  # NEW file in a throwaway container first (so a bad config can't take nginx
+  # down), then force-recreate to pick up the new inode.
+  echo "==> [deploy] nginx.conf changed — validating and recreating Nginx container..."
+  docker run --rm \
+    -v "${APP_DIR}/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+    -v /etc/letsencrypt:/etc/letsencrypt:ro \
+    nginx:1.27-alpine nginx -t
+  IMAGE_TAG="$IMAGE_TAG" $COMPOSE up -d --force-recreate --no-deps nginx
+  echo "✓ Nginx recreated with new config"
+else
+  # Config unchanged — reload (not restart) so in-flight SSL connections are
+  # not dropped. This also flushes Nginx's DNS cache so it re-resolves the new
+  # `backend` container IP after Docker replaced the container above.
+  echo "==> [deploy] Reloading Nginx..."
+  $COMPOSE exec -T nginx nginx -t   # validate config first
+  $COMPOSE exec -T nginx nginx -s reload
+  echo "✓ Nginx reloaded"
+fi
 
 # ── 5. Remove dangling images to reclaim disk ─────────────────────────────────
 echo "==> [deploy] Pruning dangling images"
