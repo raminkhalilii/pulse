@@ -9,6 +9,7 @@ Pulse is a self-hosted uptime monitoring platform. It periodically checks your w
 - **Configurable check intervals** — 1 min, 5 min, or 30 min per monitor
 - **Real-time dashboard** — live UP/DOWN status pushed via Socket.IO
 - **Historical data** — per-heartbeat logs and hourly uptime summaries
+- **SSL certificate monitoring** — daily TLS checks on https:// monitors, with expiry (30/14/7/1-day) and invalid-cert alerts
 - **Secure by default** — DNS validation blocks monitoring of private/internal IPs
 - **JWT authentication** — access + refresh token flow
 - **Fully containerized** — one `docker compose up` for dev, one pull-and-run for prod
@@ -227,6 +228,7 @@ Swagger UI is available at `/docs` when the backend is running.
 | `GET` | `/api/monitors` | List all monitors for the authenticated user |
 | `POST` | `/api/monitors` | Create a new monitor |
 | `DELETE` | `/api/monitors/:id` | Delete a monitor |
+| `GET` | `/api/monitors/:id/ssl` | Latest SSL certificate state for a monitor (issuer, expiry, validity), or `null` if not yet checked |
 
 WebSocket namespace: `/socket.io` — emits `heartbeat` events with live check results.
 
