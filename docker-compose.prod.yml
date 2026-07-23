@@ -104,6 +104,12 @@ services:
         condition: service_healthy
     # Workers process BullMQ jobs — give them time to finish the current job
     stop_grace_period: 30s
+    # NET_RAW: PING-type monitors shell out to the system `ping` binary
+    # (src/worker/checks/ping-check.handler.ts), which needs raw ICMP
+    # sockets. Without this every PING monitor reports DOWN with a
+    # permission-denied error regardless of whether the host is reachable.
+    cap_add:
+      - NET_RAW
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}

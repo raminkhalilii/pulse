@@ -84,6 +84,12 @@ services:
       DATABASE_URL: postgresql://admin:rP6_ChaKD3tI5opMeRzM@postgres:5432/pulse_database
       REDIS_HOST: redis
       REDIS_PORT: 6379
+    # NET_RAW: PING-type monitors shell out to the system `ping` binary
+    # (src/worker/checks/ping-check.handler.ts), which needs raw ICMP
+    # sockets. Without this every PING monitor reports DOWN with a
+    # permission-denied error regardless of whether the host is reachable.
+    cap_add:
+      - NET_RAW
     # Worker has no HTTP server — skip migrations (backend already ran them)
     command: ["npm", "run", "start:worker:dev"]
     volumes:
